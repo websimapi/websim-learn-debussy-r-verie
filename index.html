@@ -192,7 +192,6 @@
 
     <div id="loading" class="loading">Loading MIDI file...</div>
 
-    <script src="https://cdn.jsdelivr.net/npm/midi-parser-js@4.0.4/src/midi-parser.min.js"></script>
     <script>
         // Keyboard configuration (which computer key maps to which piano note)
         const keyboardMapping = [
@@ -238,11 +237,8 @@
                 fetch('reverie.mid')
                     .then(response => response.arrayBuffer())
                     .then(buffer => {
-                        // Convert buffer to Uint8Array
-                        const uint8Array = new Uint8Array(buffer);
-                        
-                        // Parse MIDI data
-                        midiData = MidiParser.parse(uint8Array);
+                        // Parse MIDI data manually
+                        midiData = parseMidi(buffer);
                         
                         // Extract notes from MIDI data
                         processMidiData(midiData);
@@ -253,6 +249,136 @@
                         reject(error);
                     });
             });
+        }
+
+        // Simple MIDI parser function
+        function parseMidi(arrayBuffer) {
+            const dv = new DataView(arrayBuffer);
+            const data = {
+                timeDivision: 0,
+                track: []
+            };
+            
+            // Check header chunk
+            if (getString(dv, 0, 4) !== 'MThd') {
+                console.error('Not a valid MIDI file');
+                return data;
+            }
+            
+            // Get time division (ticks per quarter note)
+            data.timeDivision = dv.getUint16(12);
+            
+            // Number of tracks
+            const numTracks = dv.getUint16(10);
+            
+            let offset = 14; // After header
+            
+            // Process each track
+            for (let i = 0; i < numTracks; i++) {
+                if (getString(dv, offset, 4) !== 'MTrk') {
+                    console.error('Invalid track header');
+                    offset += dv.getUint32(offset + 4) + 8; // Skip this chunk
+                    continue;
+                }
+                
+                const trackLength = dv.getUint32(offset + 4);
+                offset += 8; // Skip track header and length
+                
+                const trackEndOffset = offset + trackLength;
+                const track = [];
+                
+                let statusByte = null;
+                
+                // Process track events
+                while (offset < trackEndOffset) {
+                    // Read delta time
+                    let deltaTime = 0;
+                    let deltaByteValue;
+                    
+                    do {
+                        deltaByteValue = dv.getUint8(offset++);
+                        deltaTime = (deltaTime << 7) | (deltaByteValue & 0x7F);
+                    } while (deltaByteValue & 0x80);
+                    
+                    // Read event type
+                    let eventType = dv.getUint8(offset);
+                    
+                    // Use running status if applicable
+                    if (eventType < 0x80) {
+                        eventType = statusByte;
+                        offset--;
+                    } else {
+                        statusByte = eventType;
+                        offset++;
+                    }
+                    
+                    // Get event type (high nibble)
+                    const type = eventType >> 4;
+                    
+                    // Note on/off events
+                    if (type === 8 || type === 9) {
+                        const note = dv.getUint8(offset++);
+                        const velocity = dv.getUint8(offset++);
+                        
+                        track.push({
+                            deltaTime,
+                            type,
+                            data: [note, velocity]
+                        });
+                    }
+                    // Meta event (FF)
+                    else if (eventType === 0xFF) {
+                        const metaType = dv.getUint8(offset++);
+                        let length = 0;
+                        
+                        // Read variable length
+                        do {
+                            deltaByteValue = dv.getUint8(offset++);
+                            length = (length << 7) | (deltaByteValue & 0x7F);
+                        } while (deltaByteValue & 0x80);
+                        
+                        // Skip meta data
+                        offset += length;
+                    }
+                    // Sysex events (F0 or F7)
+                    else if (eventType === 0xF0 || eventType === 0xF7) {
+                        let length = 0;
+                        
+                        // Read variable length
+                        do {
+                            deltaByteValue = dv.getUint8(offset++);
+                            length = (length << 7) | (deltaByteValue & 0x7F);
+                        } while (deltaByteValue & 0x80);
+                        
+                        // Skip sysex data
+                        offset += length;
+                    }
+                    // Other events
+                    else {
+                        // Control change, program change, etc.
+                        const dataBytes = {
+                            0xC: 1, // Program change
+                            0xD: 1, // Channel aftertouch
+                        }[type] || 2;
+                        
+                        // Skip data bytes
+                        offset += dataBytes;
+                    }
+                }
+                
+                data.track.push(track);
+            }
+            
+            return data;
+            
+            // Helper function to read strings
+            function getString(dataView, offset, length) {
+                let str = '';
+                for (let i = 0; i < length; i++) {
+                    str += String.fromCharCode(dataView.getUint8(offset + i));
+                }
+                return str;
+            }
         }
 
         // Process MIDI data to extract notes
