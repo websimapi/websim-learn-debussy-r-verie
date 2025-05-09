@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Learn Debussy - Rêverie</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Arial', sans-serif;
+            background-color: #121212;
+            color: white;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        .header {
+            text-align: center;
+            padding: 10px;
+            background-color: #1a1a1a;
+        }
+
+        .game-container {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .note-container {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+        }
+
+        .keyboard {
+            display: flex;
+            justify-content: center;
+            position: relative;
+            height: 150px;
+            background-color: #1a1a1a;
+            padding: 10px 0;
+        }
+
+        .piano-key {
+            position: relative;
+            height: 140px;
+            width: 40px;
+            background-color: white;
+            border: 1px solid #000;
+            border-radius: 0 0 5px 5px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            align-items: center;
+            color: black;
+            font-weight: bold;
+            z-index: 1;
+        }
+
+        .piano-key .letter {
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+
+        .piano-key .note {
+            margin-bottom: 5px;
+            font-size: 12px;
+            color: #666;
+        }
+
+        .piano-key.black {
+            background-color: #333;
+            color: white;
+            height: 90px;
+            width: 24px;
+            margin: 0 -12px;
+            z-index: 2;
+        }
+
+        .piano-key.active {
+            background-color: #80aaff;
+        }
+
+        .piano-key.black.active {
+            background-color: #4477dd;
+        }
+
+        .falling-note {
+            position: absolute;
+            width: 36px;
+            height: 20px;
+            border-radius: 5px;
+            background-color: #80aaff;
+            z-index: 0;
+        }
+
+        .falling-note.black {
+            background-color: #4477dd;
+            width: 20px;
+        }
+
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            padding: 15px;
+            background-color: #1a1a1a;
+        }
+
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #2980b9;
+        }
+
+        .score {
+            font-size: 20px;
+            margin-right: 20px;
+        }
+
+        .hit-feedback {
+            position: absolute;
+            font-weight: bold;
+            opacity: 0;
+            transition: opacity 0.2s, transform 0.5s;
+        }
+
+        .perfect {
+            color: gold;
+        }
+
+        .good {
+            color: #4CAF50;
+        }
+
+        .miss {
+            color: #f44336;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Debussy - Rêverie</h1>
+        <p>Press the keys when the notes reach the keyboard!</p>
+    </div>
+
+    <div class="game-container">
+        <div class="note-container" id="noteContainer"></div>
+    </div>
+
+    <div class="keyboard" id="keyboard"></div>
+
+    <div class="controls">
+        <button id="startBtn">Start Song</button>
+        <button id="restartBtn">Restart</button>
+        <div class="score">Score: <span id="scoreValue">0</span></div>
+    </div>
+
+    <script>
+        // Keyboard configuration (which computer key maps to which piano note)
+        const keyboardMapping = [
+            { key: 'a', note: 'C4', type: 'white' },
+            { key: 'w', note: 'C#4', type: 'black' },
+            { key: 's', note: 'D4', type: 'white' },
+            { key: 'e', note: 'D#4', type: 'black' },
+            { key: 'd', note: 'E4', type: 'white' },
+            { key: 'f', note: 'F4', type: 'white' },
+            { key: 't', note: 'F#4', type: 'black' },
+            { key: 'g', note: 'G4', type: 'white' },
+            { key: 'y', note: 'G#4', type: 'black' },
+            { key: 'h', note: 'A4', type: 'white' },
+            { key: 'u', note: 'A#4', type: 'black' },
+            { key: 'j', note: 'B4', type: 'white' },
+            { key: 'k', note: 'C5', type: 'white' },
+            { key: 'o', note: 'C#5', type: 'black' },
+            { key: 'l', note: 'D5', type: 'white' },
+            { key: 'p', note: 'D#5', type: 'black' },
+            { key: ';', note: 'E5', type: 'white' }
+        ];
+
+        // Simplified Debussy's Rêverie notes (sequence of notes with timing)
+        // Format: { note: 'C4', time: 2000 } - note plays 2 seconds after song starts
+        const songNotes = [
+            { note: 'D#4', time: 1000 },
+            { note: 'G4', time: 2000 },
+            { note: 'A#4', time: 3000 },
+            { note: 'D5', time: 4000 },
+            { note: 'D#4', time: 5000 },
+            { note: 'G4', time: 5500 },
+            { note: 'A#4', time: 6000 },
+            { note: 'D5', time: 6500 },
+            { note: 'F4', time: 7500 },
+            { note: 'G4', time: 8000 },
+            { note: 'D#4', time: 9000 },
+            { note: 'D4', time: 10000 },
+            { note: 'C4', time: 11000 },
+            { note: 'G4', time: 12000 },
+            { note: 'F4', time: 13000 },
+            { note: 'D#4', time: 14000 },
+            { note: 'D4', time: 15000 },
+            { note: 'A#4', time: 16000 },
+            { note: 'G4', time: 17000 },
+            { note: 'F4', time: 18000 },
+            { note: 'G4', time: 19000 },
+            { note: 'D#4', time: 20000 },
+            { note: 'D4', time: 21000 },
+            { note: 'C4', time: 22000 },
+            // More notes would be added for the full piece
+        ];
+
+        // Global variables
+        let score = 0;
+        let fallingNotes = [];
+        let activeNotes = new Set();
+        let songStartTime = 0;
+        let isPlaying = false;
+        let animationId = null;
+
+        // Create keyboard
+        function createKeyboard() {
+            const keyboard = document.getElementById('keyboard');
+            keyboard.innerHTML = '';
+            
+            keyboardMapping.forEach(key => {
+                const keyElement = document.createElement('div');
+                keyElement.className = `piano-key ${key.type}`;
+                keyElement.dataset.note = key.note;
+                keyElement.dataset.key = key.key;
+                
+                const letterElement = document.createElement('div');
+                letterElement.className = 'letter';
+                letterElement.textContent = key.key.toUpperCase();
+                
+                const noteElement = document.createElement('div');
+                noteElement.className = 'note';
+                noteElement.textContent = key.note;
+                
+                keyElement.appendChild(letterElement);
+                keyElement.appendChild(noteElement);
+                keyboard.appendChild(keyElement);
+            });
+        }
+
+        // Initialize audio context and sounds
+        let audioContext;
+        let noteSounds = {};
+
+        function initAudio() {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            
+            // Preload common notes
+            keyboardMapping.forEach(key => {
+                createNoteSound(key.note);
+            });
+        }
+
+        function createNoteSound(note) {
+            const freq = getNoteFrequency(note);
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            
+            oscillator.type = 'sine';
+            oscillator.frequency.value = freq;
+            
+            gainNode.gain.value = 0;
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            
+            oscillator.start();
+            
+            noteSounds[note] = {
+                oscillator: oscillator,
+                gainNode: gainNode
+            };
+        }
+
+        function getNoteFrequency(note) {
+            const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+            const noteComponents = note.match(/([A-G]#?)(\d+)/);
+            
+            if (noteComponents) {
+                const noteName = noteComponents[1];
+                const octave = parseInt(noteComponents[2]);
+                
+                const noteIndex = notes.indexOf(noteName);
+                if (noteIndex !== -1) {
+                    // A4 is 440Hz, calculate other notes based on that
+                    const semitoneFromA4 = (octave - 4) * 12 + noteIndex - 9;
+                    return 440 * Math.pow(2, semitoneFromA4 / 12);
+                }
+            }
+            
+            return 440; // Default to A4 if parsing fails
+        }
+
+        function playNote(note) {
+            if (!noteSounds[note]) {
+                createNoteSound(note);
+            }
+            
+            const sound = noteSounds[note];
+            const now = audioContext.currentTime;
+            
+            // Reset and play the note
+            sound.gainNode.gain.cancelScheduledValues(now);
+            sound.gainNode.gain.setValueAtTime(0, now);
+            sound.gainNode.gain.linearRampToValueAtTime(0.5, now + 0.01);
+            sound.gainNode.gain.linearRampToValueAtTime(0, now + 1);
+        }
+
+        // Start the song
+        function startSong() {
+            if (isPlaying) return;
+            
+            // Initialize audio if not already
+            if (!audioContext) {
+                initAudio();
+            } else if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+            
+            score = 0;
+            document.getElementById('scoreValue').textContent = score;
+            fallingNotes = [];
+            activeNotes.clear();
+            
+            songStartTime = Date.now();
+            isPlaying = true;
+            
+            // Schedule all notes
+            songNotes.forEach(noteData => {
+                setTimeout(() => {
+                    createFallingNote(noteData.note);
+                }, noteData.time);
+            });
+            
+            animate();
+        }
+
+        // Create a falling note
+        function createFallingNote(note) {
+            const noteContainer = document.getElementById('noteContainer');
+            const keyElement = document.querySelector(`.piano-key[data-note="${note}"]`);
+            
+            if (!keyElement) return;
+            
+            const keyRect = keyElement.getBoundingClientRect();
+            const containerRect = noteContainer.getBoundingClientRect();
+            
+            const noteType = keyboardMapping.find(k => k.note === note)?.type || 'white';
+            
+            const noteElement = document.createElement('div');
+            noteElement.className = `falling-note ${noteType}`;
+            noteElement.dataset.note = note;
+            noteElement.style.left = (keyRect.left - containerRect.left + (keyRect.width - noteElement.offsetWidth) / 2) + 'px';
+            noteElement.style.top = '-20px'; // Start above the visible area
+            
+            noteContainer.appendChild(noteElement);
+            
+            fallingNotes.push({
+                element: noteElement,
+                note: note,
+                key: keyElement.dataset.key,
+                startTime: Date.now(),
+                hit: false
+            });
+        }
+
+        // Animation loop
+        function animate() {
+            const now = Date.now();
+            const elapsedTime = now - songStartTime;
+            const containerHeight = document.getElementById('noteContainer').offsetHeight;
+            const keyboardTop = document.getElementById('keyboard').offsetTop;
+            
+            // Move falling notes
+            fallingNotes.forEach((noteObj, index) => {
+                if (noteObj.hit) return;
+                
+                const fallDuration = 3000; // Time it takes for note to fall from top to keyboard (ms)
+                const noteLifetime = now - noteObj.startTime;
+                const progress = noteLifetime / fallDuration;
+                
+                if (progress <= 1) {
+                    noteObj.element.style.top = (progress * (keyboardTop + 20)) + 'px';
+                } else {
+                    // Note missed the keyboard
+                    if (!noteObj.hit) {
+                        showFeedback(noteObj.element, 'MISS', 'miss');
+                        noteObj.hit = true;
+                        setTimeout(() => {
+                            noteObj.element.remove();
+                        }, 500);
+                    }
+                }
+            });
+            
+            // Clean up hit or old notes
+            fallingNotes = fallingNotes.filter(noteObj => {
+                const maxLifetime = 5000; // Remove notes after this time (ms)
+                return (now - noteObj.startTime < maxLifetime) && noteObj.element.parentNode;
+            });
+            
+            // Continue animation if playing
+            if (isPlaying) {
+                animationId = requestAnimationFrame(animate);
+                
+                // Check if song is finished
+                if (elapsedTime > songNotes[songNotes.length - 1].time + 5000) {
+                    isPlaying = false;
+                    cancelAnimationFrame(animationId);
+                }
+            }
+        }
+
+        // Handle key press
+        function handleKeyPress(event) {
+            if (!isPlaying) return;
+            
+            const key = event.key.toLowerCase();
+            const mapping = keyboardMapping.find(k => k.key === key);
+            
+            if (mapping) {
+                const keyElement = document.querySelector(`.piano-key[data-key="${key}"]`);
+                if (keyElement) {
+                    keyElement.classList.add('active');
+                    
+                    // Play the note sound
+                    playNote(mapping.note);
+                    
+                    // Check if this key press hits any falling note
+                    const keyboardTop = document.getElementById('keyboard').offsetTop;
+                    
+                    // Find the nearest matching falling note
+                    const matchingNotes = fallingNotes.filter(n => !n.hit && n.key === key);
+                    if (matchingNotes.length > 0) {
+                        // Sort by closest to keyboard
+                        matchingNotes.sort((a, b) => {
+                            const posA = parseInt(a.element.style.top);
+                            const posB = parseInt(b.element.style.top);
+                            return Math.abs(keyboardTop - posA) - Math.abs(keyboardTop - posB);
+                        });
+                        
+                        const closestNote = matchingNotes[0];
+                        const notePos = parseInt(closestNote.element.style.top);
+                        const distance = Math.abs(keyboardTop - notePos);
+                        
+                        closestNote.hit = true;
+                        
+                        // Score based on accuracy
+                        if (distance < 20) {
+                            // Perfect hit
+                            score += 100;
+                            showFeedback(closestNote.element, 'PERFECT!', 'perfect');
+                        } else if (distance < 50) {
+                            // Good hit
+                            score += 50;
+                            showFeedback(closestNote.element, 'GOOD!', 'good');
+                        } else {
+                            // OK hit
+                            score += 10;
+                            showFeedback(closestNote.element, 'OK', '');
+                        }
+                        
+                        document.getElementById('scoreValue').textContent = score;
+                        
+                        // Remove the note
+                        setTimeout(() => {
+                            closestNote.element.remove();
+                        }, 100);
+                    }
+                }
+            }
+        }
+
+        // Handle key release
+        function handleKeyRelease(event) {
+            const key = event.key.toLowerCase();
+            const keyElement = document.querySelector(`.piano-key[data-key="${key}"]`);
+            
+            if (keyElement) {
+                keyElement.classList.remove('active');
+            }
+        }
+
+        // Show feedback for hit notes
+        function showFeedback(noteElement, text, className) {
+            const feedback = document.createElement('div');
+            feedback.className = `hit-feedback ${className}`;
+            feedback.textContent = text;
+            
+            const rect = noteElement.getBoundingClientRect();
+            feedback.style.left = `${rect.left}px`;
+            feedback.style.top = `${rect.top - 30}px`;
+            
+            document.body.appendChild(feedback);
+            
+            // Animation
+            setTimeout(() => {
+                feedback.style.opacity = '1';
+                feedback.style.transform = 'translateY(-20px)';
+                
+                setTimeout(() => {
+                    feedback.style.opacity = '0';
+                    setTimeout(() => {
+                        feedback.remove();
+                    }, 300);
+                }, 700);
+            }, 10);
+        }
+
+        // Initialize the game
+        function init() {
+            createKeyboard();
+            
+            document.getElementById('startBtn').addEventListener('click', startSong);
+            document.getElementById('restartBtn').addEventListener('click', () => {
+                if (isPlaying) {
+                    cancelAnimationFrame(animationId);
+                }
+                startSong();
+            });
+            
+            document.addEventListener('keydown', handleKeyPress);
+            document.addEventListener('keyup', handleKeyRelease);
+            
+            // Add touch support for the piano keys
+            document.querySelectorAll('.piano-key').forEach(key => {
+                key.addEventListener('touchstart', function(e) {
+                    e.preventDefault();
+                    const keyData = {
+                        key: this.dataset.key
+                    };
+                    handleKeyPress({key: keyData.key});
+                });
+                
+                key.addEventListener('touchend', function(e) {
+                    e.preventDefault();
+                    const keyData = {
+                        key: this.dataset.key
+                    };
+                    handleKeyRelease({key: keyData.key});
+                });
+            });
+        }
+
+        // Start when the page loads
+        window.addEventListener('load', init);
+    </script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"4c6229722a6346bc8eb5cb0e5eae5d41","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+</body>
+</html>
+
