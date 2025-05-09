@@ -96,11 +96,19 @@
             border-radius: 5px;
             background-color: #80aaff;
             z-index: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-weight: bold;
+            font-size: 14px;
+            color: #333;
         }
 
         .falling-note.black {
             background-color: #4477dd;
             width: 20px;
+            color: white;
+            font-size: 12px;
         }
 
         .controls {
@@ -148,6 +156,20 @@
         .miss {
             color: #f44336;
         }
+        
+        .loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            font-size: 24px;
+        }
     </style>
 </head>
 <body>
@@ -168,6 +190,9 @@
         <div class="score">Score: <span id="scoreValue">0</span></div>
     </div>
 
+    <div id="loading" class="loading">Loading MIDI file...</div>
+
+    <script src="https://cdn.jsdelivr.net/npm/midi-parser-js@4.0.4/src/midi-parser.min.js"></script>
     <script>
         // Keyboard configuration (which computer key maps to which piano note)
         const keyboardMapping = [
@@ -190,43 +215,92 @@
             { key: ';', note: 'E5', type: 'white' }
         ];
 
-        // Simplified Debussy's Rêverie notes (sequence of notes with timing)
-        // Format: { note: 'C4', time: 2000 } - note plays 2 seconds after song starts
-        const songNotes = [
-            { note: 'D#4', time: 1000 },
-            { note: 'G4', time: 2000 },
-            { note: 'A#4', time: 3000 },
-            { note: 'D5', time: 4000 },
-            { note: 'D#4', time: 5000 },
-            { note: 'G4', time: 5500 },
-            { note: 'A#4', time: 6000 },
-            { note: 'D5', time: 6500 },
-            { note: 'F4', time: 7500 },
-            { note: 'G4', time: 8000 },
-            { note: 'D#4', time: 9000 },
-            { note: 'D4', time: 10000 },
-            { note: 'C4', time: 11000 },
-            { note: 'G4', time: 12000 },
-            { note: 'F4', time: 13000 },
-            { note: 'D#4', time: 14000 },
-            { note: 'D4', time: 15000 },
-            { note: 'A#4', time: 16000 },
-            { note: 'G4', time: 17000 },
-            { note: 'F4', time: 18000 },
-            { note: 'G4', time: 19000 },
-            { note: 'D#4', time: 20000 },
-            { note: 'D4', time: 21000 },
-            { note: 'C4', time: 22000 },
-            // More notes would be added for the full piece
-        ];
-
         // Global variables
+        let songNotes = [];
         let score = 0;
         let fallingNotes = [];
         let activeNotes = new Set();
         let songStartTime = 0;
         let isPlaying = false;
         let animationId = null;
+        let midiData = null;
+
+        // MIDI note number to note name mapping
+        const midiNoteToName = {
+            60: 'C4', 61: 'C#4', 62: 'D4', 63: 'D#4', 64: 'E4', 65: 'F4', 66: 'F#4',
+            67: 'G4', 68: 'G#4', 69: 'A4', 70: 'A#4', 71: 'B4', 72: 'C5', 73: 'C#5',
+            74: 'D5', 75: 'D#5', 76: 'E5'
+        };
+
+        // Load MIDI file
+        function loadMidiFile() {
+            return new Promise((resolve, reject) => {
+                fetch('reverie.mid')
+                    .then(response => response.arrayBuffer())
+                    .then(buffer => {
+                        // Convert buffer to Uint8Array
+                        const uint8Array = new Uint8Array(buffer);
+                        
+                        // Parse MIDI data
+                        midiData = MidiParser.parse(uint8Array);
+                        
+                        // Extract notes from MIDI data
+                        processMidiData(midiData);
+                        resolve();
+                    })
+                    .catch(error => {
+                        console.error('Error loading MIDI file:', error);
+                        reject(error);
+                    });
+            });
+        }
+
+        // Process MIDI data to extract notes
+        function processMidiData(midiData) {
+            songNotes = [];
+            
+            // Get the first track with notes (usually track 1)
+            const track = midiData.track.find(t => t.length > 5) || midiData.track[0];
+            
+            let currentTime = 0;
+            const ticksPerBeat = midiData.timeDivision;
+            const tempo = 500000; // Default tempo (microseconds per quarter note)
+            
+            for (let i = 0; i < track.length; i++) {
+                const event = track[i];
+                
+                // Update time
+                currentTime += event.deltaTime;
+                
+                // Note on event (9 is the status for note on)
+                if ((event.type === 9 || event.type === 8) && event.data[1] > 0) {
+                    const midiNote = event.data[0];
+                    const noteName = midiNoteToName[midiNote];
+                    
+                    // Skip notes not in our keyboard mapping
+                    if (!noteName) continue;
+                    
+                    // Convert ticks to milliseconds
+                    const timeMs = Math.round((currentTime * tempo) / (ticksPerBeat * 1000));
+                    
+                    songNotes.push({
+                        note: noteName,
+                        time: timeMs
+                    });
+                }
+            }
+            
+            // Sort notes by time
+            songNotes.sort((a, b) => a.time - b.time);
+            
+            // Adjust timing to start at a reasonable time
+            const firstNoteTime = songNotes[0].time;
+            songNotes.forEach(note => {
+                note.time = note.time - firstNoteTime + 1000; // Start 1 second after
+            });
+            
+            console.log('Processed notes:', songNotes.length);
+        }
 
         // Create keyboard
         function createKeyboard() {
@@ -360,11 +434,16 @@
             const keyRect = keyElement.getBoundingClientRect();
             const containerRect = noteContainer.getBoundingClientRect();
             
-            const noteType = keyboardMapping.find(k => k.note === note)?.type || 'white';
+            const noteMapping = keyboardMapping.find(k => k.note === note);
+            if (!noteMapping) return;
+            
+            const noteType = noteMapping.type;
+            const keyLetter = noteMapping.key.toUpperCase();
             
             const noteElement = document.createElement('div');
             noteElement.className = `falling-note ${noteType}`;
             noteElement.dataset.note = note;
+            noteElement.textContent = keyLetter; // Add key letter inside the note
             noteElement.style.left = (keyRect.left - containerRect.left + (keyRect.width - noteElement.offsetWidth) / 2) + 'px';
             noteElement.style.top = '-20px'; // Start above the visible area
             
@@ -419,7 +498,7 @@
                 animationId = requestAnimationFrame(animate);
                 
                 // Check if song is finished
-                if (elapsedTime > songNotes[songNotes.length - 1].time + 5000) {
+                if (songNotes.length > 0 && elapsedTime > songNotes[songNotes.length - 1].time + 5000) {
                     isPlaying = false;
                     cancelAnimationFrame(animationId);
                 }
@@ -523,8 +602,16 @@
         }
 
         // Initialize the game
-        function init() {
+        async function init() {
             createKeyboard();
+            
+            try {
+                await loadMidiFile();
+                document.getElementById('loading').style.display = 'none';
+            } catch (error) {
+                console.error('Failed to load MIDI:', error);
+                document.getElementById('loading').textContent = 'Failed to load MIDI file. Please refresh.';
+            }
             
             document.getElementById('startBtn').addEventListener('click', startSong);
             document.getElementById('restartBtn').addEventListener('click', () => {
@@ -563,4 +650,3 @@
 <script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"4c6229722a6346bc8eb5cb0e5eae5d41","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body>
 </html>
-
