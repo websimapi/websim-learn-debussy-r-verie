@@ -193,6 +193,7 @@
     <div id="loading" class="loading">Loading MIDI file...</div>
 
     <script src="https://cdn.jsdelivr.net/npm/tone@14.7.77/build/Tone.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tonejs/midi@2.0.28/build/Midi.js"></script>
     <script>
         // Keyboard configuration (which computer key maps to which piano note)
         const keyboardMapping = [
@@ -238,10 +239,12 @@
             try {
                 const response = await fetch('reverie.mid');
                 const arrayBuffer = await response.arrayBuffer();
-                const midiData = await Tone.Midi.parse(arrayBuffer);
+                
+                // Use the Midi from @tonejs/midi library
+                const midi = new Midi(arrayBuffer);
                 
                 // Process MIDI data
-                processToneMidiData(midiData);
+                processToneMidiData(midi);
                 return true;
             } catch (error) {
                 console.error('Error loading MIDI file:', error);
@@ -250,19 +253,20 @@
         }
 
         // Process MIDI data from Tone.js parser
-        function processToneMidiData(midiData) {
+        function processToneMidiData(midi) {
             songNotes = [];
             
             // Get melody tracks (we'll use tracks that have a significant number of notes)
-            const tracks = midiData.tracks.filter(track => track.notes && track.notes.length > 10);
+            const tracks = midi.tracks.filter(track => track.notes && track.notes.length > 10);
             
             // Extract notes from all relevant tracks
             tracks.forEach(track => {
                 track.notes.forEach(note => {
-                    const noteName = note.name;
+                    // Convert MIDI note to our note format
+                    const noteName = midiNoteToName[note.midi];
                     
                     // Skip notes not in our keyboard mapping
-                    if (!keyboardMapping.some(key => key.note === noteName)) return;
+                    if (!noteName || !keyboardMapping.some(key => key.note === noteName)) return;
                     
                     songNotes.push({
                         note: noteName,
