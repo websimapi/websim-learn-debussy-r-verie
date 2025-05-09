@@ -192,6 +192,7 @@
 
     <div id="loading" class="loading">Loading MIDI file...</div>
 
+    <script src="https://cdn.jsdelivr.net/npm/tone@14.7.77/build/Tone.min.js"></script>
     <script>
         // Keyboard configuration (which computer key maps to which piano note)
         const keyboardMapping = [
@@ -223,6 +224,7 @@
         let isPlaying = false;
         let animationId = null;
         let midiData = null;
+        let piano = null;
 
         // MIDI note number to note name mapping
         const midiNoteToName = {
@@ -232,195 +234,50 @@
         };
 
         // Load MIDI file
-        function loadMidiFile() {
-            return new Promise((resolve, reject) => {
-                fetch('reverie.mid')
-                    .then(response => response.arrayBuffer())
-                    .then(buffer => {
-                        // Parse MIDI data manually
-                        midiData = parseMidi(buffer);
-                        
-                        // Extract notes from MIDI data
-                        processMidiData(midiData);
-                        resolve();
-                    })
-                    .catch(error => {
-                        console.error('Error loading MIDI file:', error);
-                        reject(error);
-                    });
-            });
-        }
-
-        // Simple MIDI parser function
-        function parseMidi(arrayBuffer) {
-            const dv = new DataView(arrayBuffer);
-            const data = {
-                timeDivision: 0,
-                track: []
-            };
-            
-            // Check header chunk
-            if (getString(dv, 0, 4) !== 'MThd') {
-                console.error('Not a valid MIDI file');
-                return data;
-            }
-            
-            // Get time division (ticks per quarter note)
-            data.timeDivision = dv.getUint16(12);
-            
-            // Number of tracks
-            const numTracks = dv.getUint16(10);
-            
-            let offset = 14; // After header
-            
-            // Process each track
-            for (let i = 0; i < numTracks; i++) {
-                if (getString(dv, offset, 4) !== 'MTrk') {
-                    console.error('Invalid track header');
-                    offset += dv.getUint32(offset + 4) + 8; // Skip this chunk
-                    continue;
-                }
+        async function loadMidiFile() {
+            try {
+                const response = await fetch('reverie.mid');
+                const arrayBuffer = await response.arrayBuffer();
+                const midiData = await Tone.Midi.parse(arrayBuffer);
                 
-                const trackLength = dv.getUint32(offset + 4);
-                offset += 8; // Skip track header and length
-                
-                const trackEndOffset = offset + trackLength;
-                const track = [];
-                
-                let statusByte = null;
-                
-                // Process track events
-                while (offset < trackEndOffset) {
-                    // Read delta time
-                    let deltaTime = 0;
-                    let deltaByteValue;
-                    
-                    do {
-                        deltaByteValue = dv.getUint8(offset++);
-                        deltaTime = (deltaTime << 7) | (deltaByteValue & 0x7F);
-                    } while (deltaByteValue & 0x80);
-                    
-                    // Read event type
-                    let eventType = dv.getUint8(offset);
-                    
-                    // Use running status if applicable
-                    if (eventType < 0x80) {
-                        eventType = statusByte;
-                        offset--;
-                    } else {
-                        statusByte = eventType;
-                        offset++;
-                    }
-                    
-                    // Get event type (high nibble)
-                    const type = eventType >> 4;
-                    
-                    // Note on/off events
-                    if (type === 8 || type === 9) {
-                        const note = dv.getUint8(offset++);
-                        const velocity = dv.getUint8(offset++);
-                        
-                        track.push({
-                            deltaTime,
-                            type,
-                            data: [note, velocity]
-                        });
-                    }
-                    // Meta event (FF)
-                    else if (eventType === 0xFF) {
-                        const metaType = dv.getUint8(offset++);
-                        let length = 0;
-                        
-                        // Read variable length
-                        do {
-                            deltaByteValue = dv.getUint8(offset++);
-                            length = (length << 7) | (deltaByteValue & 0x7F);
-                        } while (deltaByteValue & 0x80);
-                        
-                        // Skip meta data
-                        offset += length;
-                    }
-                    // Sysex events (F0 or F7)
-                    else if (eventType === 0xF0 || eventType === 0xF7) {
-                        let length = 0;
-                        
-                        // Read variable length
-                        do {
-                            deltaByteValue = dv.getUint8(offset++);
-                            length = (length << 7) | (deltaByteValue & 0x7F);
-                        } while (deltaByteValue & 0x80);
-                        
-                        // Skip sysex data
-                        offset += length;
-                    }
-                    // Other events
-                    else {
-                        // Control change, program change, etc.
-                        const dataBytes = {
-                            0xC: 1, // Program change
-                            0xD: 1, // Channel aftertouch
-                        }[type] || 2;
-                        
-                        // Skip data bytes
-                        offset += dataBytes;
-                    }
-                }
-                
-                data.track.push(track);
-            }
-            
-            return data;
-            
-            // Helper function to read strings
-            function getString(dataView, offset, length) {
-                let str = '';
-                for (let i = 0; i < length; i++) {
-                    str += String.fromCharCode(dataView.getUint8(offset + i));
-                }
-                return str;
+                // Process MIDI data
+                processToneMidiData(midiData);
+                return true;
+            } catch (error) {
+                console.error('Error loading MIDI file:', error);
+                return false;
             }
         }
 
-        // Process MIDI data to extract notes
-        function processMidiData(midiData) {
+        // Process MIDI data from Tone.js parser
+        function processToneMidiData(midiData) {
             songNotes = [];
             
-            // Get the first track with notes (usually track 1)
-            const track = midiData.track.find(t => t.length > 5) || midiData.track[0];
+            // Get melody tracks (we'll use tracks that have a significant number of notes)
+            const tracks = midiData.tracks.filter(track => track.notes && track.notes.length > 10);
             
-            let currentTime = 0;
-            const ticksPerBeat = midiData.timeDivision;
-            const tempo = 500000; // Default tempo (microseconds per quarter note)
-            
-            for (let i = 0; i < track.length; i++) {
-                const event = track[i];
-                
-                // Update time
-                currentTime += event.deltaTime;
-                
-                // Note on event (9 is the status for note on)
-                if ((event.type === 9 || event.type === 8) && event.data[1] > 0) {
-                    const midiNote = event.data[0];
-                    const noteName = midiNoteToName[midiNote];
+            // Extract notes from all relevant tracks
+            tracks.forEach(track => {
+                track.notes.forEach(note => {
+                    const noteName = note.name;
                     
                     // Skip notes not in our keyboard mapping
-                    if (!noteName) continue;
-                    
-                    // Convert ticks to milliseconds
-                    const timeMs = Math.round((currentTime * tempo) / (ticksPerBeat * 1000));
+                    if (!keyboardMapping.some(key => key.note === noteName)) return;
                     
                     songNotes.push({
                         note: noteName,
-                        time: timeMs
+                        time: note.time * 1000, // Convert to milliseconds
+                        duration: note.duration * 1000, // Convert to milliseconds
+                        velocity: note.velocity
                     });
-                }
-            }
+                });
+            });
             
             // Sort notes by time
             songNotes.sort((a, b) => a.time - b.time);
             
             // Adjust timing to start at a reasonable time
-            const firstNoteTime = songNotes[0].time;
+            const firstNoteTime = songNotes[0]?.time || 0;
             songNotes.forEach(note => {
                 note.time = note.time - firstNoteTime + 1000; // Start 1 second after
             });
@@ -453,83 +310,68 @@
             });
         }
 
-        // Initialize audio context and sounds
-        let audioContext;
-        let noteSounds = {};
-
-        function initAudio() {
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        // Initialize audio
+        async function initAudio() {
+            await Tone.start();
             
-            // Preload common notes
-            keyboardMapping.forEach(key => {
-                createNoteSound(key.note);
+            // Create a sampler with piano sounds
+            piano = new Tone.Sampler({
+                urls: {
+                    A0: "A0.mp3",
+                    C1: "C1.mp3",
+                    "D#1": "Ds1.mp3",
+                    "F#1": "Fs1.mp3",
+                    A1: "A1.mp3",
+                    C2: "C2.mp3",
+                    "D#2": "Ds2.mp3",
+                    "F#2": "Fs2.mp3",
+                    A2: "A2.mp3",
+                    C3: "C3.mp3",
+                    "D#3": "Ds3.mp3",
+                    "F#3": "Fs3.mp3",
+                    A3: "A3.mp3",
+                    C4: "C4.mp3",
+                    "D#4": "Ds4.mp3",
+                    "F#4": "Fs4.mp3",
+                    A4: "A4.mp3",
+                    C5: "C5.mp3",
+                    "D#5": "Ds5.mp3",
+                    "F#5": "Fs5.mp3",
+                    A5: "A5.mp3",
+                    C6: "C6.mp3",
+                    "D#6": "Ds6.mp3",
+                    "F#6": "Fs6.mp3",
+                    A6: "A6.mp3",
+                    C7: "C7.mp3",
+                    "D#7": "Ds7.mp3",
+                    "F#7": "Fs7.mp3",
+                    A7: "A7.mp3",
+                    C8: "C8.mp3"
+                },
+                release: 1,
+                baseUrl: "https://tonejs.github.io/audio/salamander/"
+            }).toDestination();
+            
+            // Wait for the sampler to load
+            return new Promise(resolve => {
+                Tone.loaded().then(resolve);
             });
         }
 
-        function createNoteSound(note) {
-            const freq = getNoteFrequency(note);
-            const oscillator = audioContext.createOscillator();
-            const gainNode = audioContext.createGain();
-            
-            oscillator.type = 'sine';
-            oscillator.frequency.value = freq;
-            
-            gainNode.gain.value = 0;
-            
-            oscillator.connect(gainNode);
-            gainNode.connect(audioContext.destination);
-            
-            oscillator.start();
-            
-            noteSounds[note] = {
-                oscillator: oscillator,
-                gainNode: gainNode
-            };
-        }
-
-        function getNoteFrequency(note) {
-            const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-            const noteComponents = note.match(/([A-G]#?)(\d+)/);
-            
-            if (noteComponents) {
-                const noteName = noteComponents[1];
-                const octave = parseInt(noteComponents[2]);
-                
-                const noteIndex = notes.indexOf(noteName);
-                if (noteIndex !== -1) {
-                    // A4 is 440Hz, calculate other notes based on that
-                    const semitoneFromA4 = (octave - 4) * 12 + noteIndex - 9;
-                    return 440 * Math.pow(2, semitoneFromA4 / 12);
-                }
+        // Play a note with proper piano sound
+        function playNote(note, duration = 1.0, velocity = 0.7) {
+            if (piano) {
+                piano.triggerAttackRelease(note, duration, Tone.now(), velocity);
             }
-            
-            return 440; // Default to A4 if parsing fails
-        }
-
-        function playNote(note) {
-            if (!noteSounds[note]) {
-                createNoteSound(note);
-            }
-            
-            const sound = noteSounds[note];
-            const now = audioContext.currentTime;
-            
-            // Reset and play the note
-            sound.gainNode.gain.cancelScheduledValues(now);
-            sound.gainNode.gain.setValueAtTime(0, now);
-            sound.gainNode.gain.linearRampToValueAtTime(0.5, now + 0.01);
-            sound.gainNode.gain.linearRampToValueAtTime(0, now + 1);
         }
 
         // Start the song
-        function startSong() {
+        async function startSong() {
             if (isPlaying) return;
             
             // Initialize audio if not already
-            if (!audioContext) {
-                initAudio();
-            } else if (audioContext.state === 'suspended') {
-                audioContext.resume();
+            if (!piano) {
+                await initAudio();
             }
             
             score = 0;
@@ -540,10 +382,13 @@
             songStartTime = Date.now();
             isPlaying = true;
             
+            // Clear any previous notes
+            document.getElementById('noteContainer').innerHTML = '';
+            
             // Schedule all notes
             songNotes.forEach(noteData => {
                 setTimeout(() => {
-                    createFallingNote(noteData.note);
+                    createFallingNote(noteData.note, noteData.duration, noteData.velocity);
                 }, noteData.time);
             });
             
@@ -551,7 +396,7 @@
         }
 
         // Create a falling note
-        function createFallingNote(note) {
+        function createFallingNote(note, duration, velocity) {
             const noteContainer = document.getElementById('noteContainer');
             const keyElement = document.querySelector(`.piano-key[data-note="${note}"]`);
             
@@ -569,8 +414,10 @@
             const noteElement = document.createElement('div');
             noteElement.className = `falling-note ${noteType}`;
             noteElement.dataset.note = note;
-            noteElement.textContent = keyLetter; // Add key letter inside the note
-            noteElement.style.left = (keyRect.left - containerRect.left + (keyRect.width - noteElement.offsetWidth) / 2) + 'px';
+            noteElement.dataset.duration = duration;
+            noteElement.dataset.velocity = velocity;
+            noteElement.textContent = keyLetter;
+            noteElement.style.left = (keyRect.left - containerRect.left + (keyRect.width - (noteType === 'black' ? 20 : 36)) / 2) + 'px';
             noteElement.style.top = '-20px'; // Start above the visible area
             
             noteContainer.appendChild(noteElement);
@@ -580,6 +427,8 @@
                 note: note,
                 key: keyElement.dataset.key,
                 startTime: Date.now(),
+                duration: duration / 1000, // Convert ms to seconds
+                velocity: velocity,
                 hit: false
             });
         }
@@ -608,7 +457,7 @@
                         noteObj.hit = true;
                         
                         // Play the note even when missed
-                        playNote(noteObj.note);
+                        playNote(noteObj.note, noteObj.duration, noteObj.velocity);
                         
                         // Highlight the corresponding key briefly
                         const keyElement = document.querySelector(`.piano-key[data-note="${noteObj.note}"]`);
@@ -656,9 +505,6 @@
                 if (keyElement) {
                     keyElement.classList.add('active');
                     
-                    // Play the note sound
-                    playNote(mapping.note);
-                    
                     // Check if this key press hits any falling note
                     const keyboardTop = document.getElementById('keyboard').offsetTop;
                     
@@ -677,6 +523,9 @@
                         const distance = Math.abs(keyboardTop - notePos);
                         
                         closestNote.hit = true;
+                        
+                        // Play the note with its proper duration and velocity
+                        playNote(mapping.note, closestNote.duration, closestNote.velocity);
                         
                         // Score based on accuracy
                         if (distance < 20) {
@@ -699,6 +548,9 @@
                         setTimeout(() => {
                             closestNote.element.remove();
                         }, 100);
+                    } else {
+                        // No note to hit, just play the sound
+                        playNote(mapping.note, 0.5, 0.5);
                     }
                 }
             }
@@ -745,11 +597,15 @@
             createKeyboard();
             
             try {
-                await loadMidiFile();
+                document.getElementById('loading').textContent = 'Loading MIDI file and piano sounds...';
+                const midiLoaded = await loadMidiFile();
+                if (!midiLoaded) throw new Error('Failed to load MIDI file');
+                
+                await initAudio();
                 document.getElementById('loading').style.display = 'none';
             } catch (error) {
-                console.error('Failed to load MIDI:', error);
-                document.getElementById('loading').textContent = 'Failed to load MIDI file. Please refresh.';
+                console.error('Failed to initialize:', error);
+                document.getElementById('loading').textContent = 'Failed to load resources. Please refresh.';
             }
             
             document.getElementById('startBtn').addEventListener('click', startSong);
