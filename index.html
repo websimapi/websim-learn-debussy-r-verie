@@ -606,6 +606,19 @@
                     if (!noteObj.hit) {
                         showFeedback(noteObj.element, 'MISS', 'miss');
                         noteObj.hit = true;
+                        
+                        // Play the note even when missed
+                        playNote(noteObj.note);
+                        
+                        // Highlight the corresponding key briefly
+                        const keyElement = document.querySelector(`.piano-key[data-note="${noteObj.note}"]`);
+                        if (keyElement) {
+                            keyElement.classList.add('active');
+                            setTimeout(() => {
+                                keyElement.classList.remove('active');
+                            }, 200);
+                        }
+                        
                         setTimeout(() => {
                             noteObj.element.remove();
                         }, 500);
